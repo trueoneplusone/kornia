@@ -52,6 +52,8 @@ jobs:
         shell: bash
         run: |
           ulimit -c 0
+          pixi run -e py313 uv run --no-sync python diagnostics/mps/probe_int32_parents.py \
+            --device mps | tee mps-probe-results/int32-boundary.log
           for shape in row column batch; do
             pixi run -e py313 uv run --no-sync python diagnostics/mps/probe_mps.py \
               --source kornia/contrib/connected_components.py --device mps \
