@@ -123,7 +123,8 @@ def ccl_case(torch, device, source, shape_name, variant):
         sync(torch, device)
         result = original_scatter(self, dim, index, src, **kwargs)
         sync(torch, device)
-        emit("after_ccl_scatter", minimum=int(result.min().cpu()), maximum=int(result.max().cpu()))
+        host_result = result.cpu()
+        emit("after_ccl_scatter", minimum=int(host_result.min()), maximum=int(host_result.max()))
         return result
 
     torch.where = traced_where
@@ -219,13 +220,13 @@ def main():
         test_file = "tests/contrib/test_connected_components_union_find.py"
         env = dict(os.environ, KORNIA_TEST_DEVICE=args.device, KORNIA_TEST_DTYPE="float32")
         collected = subprocess.run([sys.executable, "-m", "pytest", test_file,
-                                    "--collect-only", "-q", "-k", "long_connected_regions"],
+                                    "--collect-only", "-q", "--color=no", "-k", "long_connected_regions"],
                                    cwd=args.pytest_repo, env=env, capture_output=True, text=True, check=True)
         (args.output / "pytest-collection.log").write_text(collected.stdout + collected.stderr, encoding="utf-8")
         nodes = [line.strip() for line in collected.stdout.splitlines() if line.startswith(test_file + "::")]
         assert len(nodes) == 3, nodes
         for n, node in enumerate(nodes):
-            run(f"pytest-long-{n}", [sys.executable, "-m", "pytest", node, "-vv", "-s", "--tb=long"],
+            run(f"pytest-long-{n}", [sys.executable, "-m", "pytest", node, "-vv", "-s", "--tb=long", "--color=no"],
                 cwd=args.pytest_repo)
     emit("finished", processes=len(results), failures=sum(r["returncode"] != 0 for r in results))
     if any(row["returncode"] != 0 for row in results):

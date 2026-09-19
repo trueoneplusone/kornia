@@ -48,13 +48,18 @@ jobs:
           pixi run -e py313 uv run --no-sync python -c \
             'import sys,torch; print(sys.version); print(torch.__version__, torch.version.git_version); assert torch.__version__.split("+")[0]=="2.14.0"; assert torch.backends.mps.is_available(); x=torch.ones(2,device="mps"); assert (x+x).sum().item()==4; print("MPS available")'
           pixi run -e py313 uv run --no-sync uv pip freeze > mps-probe-results/pip-freeze.txt
-      - name: Run isolated operator and original test probes
+      - name: Validate repaired CCL on MPS
         shell: bash
         run: |
           ulimit -c 0
-          pixi run -e py313 uv run --no-sync python diagnostics/mps/probe_mps.py \
-            --source kornia/contrib/connected_components.py --device mps \
-            --output mps-probe-results --pytest-repo . --timeout 90
+          for shape in row column batch; do
+            pixi run -e py313 uv run --no-sync python diagnostics/mps/probe_mps.py \
+              --source kornia/contrib/connected_components.py --device mps \
+              --case "ccl:$shape:native" | tee "mps-probe-results/ccl-$shape.log"
+          done
+          pixi run -e py313 uv run --no-sync python -m pytest \
+            tests/contrib/test_connected_components_union_find.py \
+            --color=no -vv -o addopts='' | tee mps-probe-results/pytest.log
       - name: Preserve every child result, including native aborts
         if: always()
         uses: actions/upload-artifact@v7
