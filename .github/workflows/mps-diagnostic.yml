@@ -1,0 +1,65 @@
+name: MPS diagnostic (fork only)
+
+on:
+  push:
+    branches: [diagnostics/ccl-mps-20260919]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    if: github.repository == 'trueoneplusone/kornia'
+    runs-on: macos-15
+    timeout-minutes: 20
+    env:
+      KORNIA_TEST_DEVICE: mps
+      KORNIA_TEST_DTYPE: float32
+      MKL_NUM_THREADS: "1"
+      OMP_NUM_THREADS: "1"
+      UV_NO_SYNC: "1"
+      PYTHONFAULTHANDLER: "1"
+      PYTHONUNBUFFERED: "1"
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: prefix-dev/setup-pixi@v0.10.2
+        with:
+          pixi-version: v0.40.0
+          cache: false
+          environments: py313
+      - name: Install matching upstream environment
+        shell: bash
+        run: |
+          pixi run -e py313 install
+          pixi run -e py313 uv run --no-sync uv pip install \
+            --reinstall-package torch --index-url https://download.pytorch.org/whl/cpu 'torch==2.14.0'
+          pixi run -e py313 uv run --no-sync python .github/scripts/check_torch_env.py \
+            --channel pinned --expected 2.14.0
+      - name: Verify source and environment
+        shell: bash
+        run: |
+          mkdir -p mps-probe-results
+          git rev-parse HEAD | tee mps-probe-results/source-head.txt
+          shasum -a 256 kornia/contrib/connected_components.py | tee mps-probe-results/source-sha256.txt
+          sw_vers | tee mps-probe-results/macos.txt
+          pixi run -e py313 uv run --no-sync python -c \
+            'import sys,torch; print(sys.version); print(torch.__version__, torch.version.git_version); assert torch.__version__.split("+")[0]=="2.14.0"; assert torch.backends.mps.is_available(); x=torch.ones(2,device="mps"); assert (x+x).sum().item()==4; print("MPS available")'
+          pixi run -e py313 uv run --no-sync uv pip freeze > mps-probe-results/pip-freeze.txt
+      - name: Run isolated operator and original test probes
+        shell: bash
+        run: |
+          ulimit -c 0
+          pixi run -e py313 uv run --no-sync python diagnostics/mps/probe_mps.py \
+            --source kornia/contrib/connected_components.py --device mps \
+            --output mps-probe-results --pytest-repo . --timeout 90
+      - name: Preserve every child result, including native aborts
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: mps-4666-diagnostics
+          path: mps-probe-results/
+          if-no-files-found: error
+          retention-days: 7
